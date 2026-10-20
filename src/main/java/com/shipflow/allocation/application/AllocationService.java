@@ -15,6 +15,7 @@ import com.shipflow.observability.ShipFlowMetrics;
 import com.shipflow.shipment.application.ShipmentLifecycle;
 import com.shipflow.shipment.application.TransitionCause;
 import com.shipflow.shipment.domain.Shipment;
+import com.shipflow.shipment.persistence.ShipmentRepository;
 import com.shipflow.shipment.domain.ShipmentStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -39,6 +40,15 @@ import java.util.Set;
  */
 @Service
 public class AllocationService {
+    /**
+     * FIRST: reserve capacity before writing anything else, falling through the ranked list on lost races
+     * (always terminates; the row lock is held for the rest of the transaction).
+     * LAST: optimistic - write everything for the best candidate, flush, and reserve as the final statement so the
+     * hot capacity row is locked only for ~1 round trip + commit; a lost race throws {@link CapacityRaceLostException}
+     * and the caller retries the whole transaction (last attempt uses FIRST). See docs/PERFORMANCE.md.
+     */
+    public enum Reservation { FIRST, LAST }
+
     public record Result(Optional<Long> carrierId, long decisionId, String summary) {
     }
 
@@ -49,6 +59,7 @@ public class AllocationService {
     private final EddService edd;
     private final NetworkDirectory network;
     private final ShipmentLifecycle lifecycle;
+    private final ShipmentRepository shipments;
     private final ShipFlowMetrics metrics;
     private final ObjectMapper mapper;
     private final Clock clock;
@@ -56,7 +67,7 @@ public class AllocationService {
 
     public AllocationService(CandidateRepository candidates, AllocationEngine engine, CapacityRepository capacity,
                              AllocationDecisionRepository decisions, EddService edd, NetworkDirectory network,
-                             ShipmentLifecycle lifecycle, ShipFlowMetrics metrics, ObjectMapper mapper, Clock clock,
+                             ShipmentLifecycle lifecycle, ShipmentRepository shipments, ShipFlowMetrics metrics, ObjectMapper mapper, Clock clock,
                              ShipFlowProperties props) {
         this.candidates = candidates;
         this.engine = engine;
@@ -65,6 +76,7 @@ public class AllocationService {
         this.edd = edd;
         this.network = network;
         this.lifecycle = lifecycle;
+        this.shipments = shipments;
         this.metrics = metrics;
         this.mapper = mapper;
         this.clock = clock;
@@ -73,6 +85,11 @@ public class AllocationService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public Result allocate(Shipment s, Set<Long> excludedCarrierIds, String actor, String trigger) {
+        return allocate(s, excludedCarrierIds, actor, trigger, Reservation.FIRST);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Result allocate(Shipment s, Set<Long> excludedCarrierIds, String actor, String trigger, Reservation mode) {
         long started = System.nanoTime();
         Instant now = clock.instant();
         HubInfo origin = network.hub(s.getOriginHubId()).orElseThrow();
@@ -85,7 +102,12 @@ public class AllocationService {
 
         AllocationPlan.ScoredCandidate chosen = null;
         List<Map<String, Object>> attempts = new ArrayList<>();
-        for (AllocationPlan.ScoredCandidate sc : plan.ranked()) {
+        boolean reserveLast = mode == Reservation.LAST && !plan.ranked().isEmpty();
+        if (reserveLast) {
+            chosen = plan.ranked().get(0); // snapshot says it has room; confirmed by the final reserve below
+            attempts.add(attempt(chosen.code(), "RESERVED"));
+        }
+        for (AllocationPlan.ScoredCandidate sc : reserveLast ? List.<AllocationPlan.ScoredCandidate>of() : plan.ranked()) {
             long carrierId = sc.priced().candidate().carrier().id();
             if (capacity.tryReserve(carrierId, s.getZoneCode(), serviceDate)) {
                 attempts.add(attempt(sc.code(), "RESERVED"));
@@ -111,6 +133,13 @@ public class AllocationService {
             } else {
                 lifecycle.transition(s, ShipmentStatus.ALLOCATED, TransitionCause.system(actor,
                         "allocated to " + chosenCode + " (" + trigger + ")"));
+            }
+            if (reserveLast) {
+                shipments.flush(); // every other write first: the hot capacity row is locked only until commit
+                if (!capacity.tryReserve(cand.carrier().id(), s.getZoneCode(), serviceDate)) {
+                    metrics.allocation("race_lost", chosenCode);
+                    throw new CapacityRaceLostException(chosenCode);
+                }
             }
             metrics.allocation("allocated", chosenCode);
             result = new Result(Optional.of(cand.carrier().id()), id, chosenCode);

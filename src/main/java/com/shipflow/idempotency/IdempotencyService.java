@@ -1,5 +1,7 @@
 package com.shipflow.idempotency;
 
+import com.shipflow.common.error.TransientConflictException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.shipflow.common.error.ErrorCode;
 import com.shipflow.common.error.ShipFlowException;
 import com.shipflow.config.ShipFlowProperties;
@@ -17,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -74,6 +77,15 @@ public class IdempotencyService {
     }
 
     public Outcome execute(Request req, Supplier<Created> action) {
+        return execute(req, 1, attempt -> action.get());
+    }
+
+    /**
+     * Like {@link #execute(Request, Supplier)} but re-runs the action (each time in a fresh transaction, while still
+     * holding the idempotency claim) when it throws a {@link TransientConflictException}, up to {@code maxAttempts}.
+     * The action receives the 1-based attempt number.
+     */
+    public Outcome execute(Request req, int maxAttempts, IntFunction<Created> action) {
         validateKey(req.key());
         Instant now = clock.instant();
         Optional<Long> claim = requiresNew.execute(s -> {
@@ -88,11 +100,21 @@ public class IdempotencyService {
         }
         long id = claim.get();
         try {
-            return joinOrNew.execute(s -> {
-                Created created = action.get();
-                repository.complete(id, created.resourceId(), created.status(), clock.instant());
-                return new Outcome(created.resourceId(), created.status(), false);
-            });
+            for (int attempt = 1; ; attempt++) {
+                final int n = attempt;
+                try {
+                    return joinOrNew.execute(s -> {
+                        Created created = action.apply(n);
+                        repository.complete(id, created.resourceId(), created.status(), clock.instant());
+                        return new Outcome(created.resourceId(), created.status(), false);
+                    });
+                } catch (TransientConflictException e) {
+                    if (attempt >= maxAttempts || TransactionSynchronizationManager.isActualTransactionActive()) {
+                        throw e;
+                    }
+                    log.debug("retrying {} after transient conflict (attempt {}): {}", req.operation(), attempt, e.getMessage());
+                }
+            }
         } catch (RuntimeException e) {
             try {
                 requiresNew.executeWithoutResult(s -> repository.release(id));

@@ -20,7 +20,7 @@ public final class TestProps {
                 new ShipFlowProperties.Jwt(TestJwt.SECRET, "shipflow"),
                 new ShipFlowProperties.Scheduling(false),
                 new ShipFlowProperties.Idempotency(Duration.ofHours(24), Duration.ofMinutes(1)),
-                new ShipFlowProperties.Allocation(WEIGHTS, 3),
+                new ShipFlowProperties.Allocation(WEIGHTS, 3, true, 3),
                 scorecard(),
                 new ShipFlowProperties.Booking(Duration.ofSeconds(2), Duration.ofSeconds(30), Duration.ofSeconds(15),
                         Duration.ofMinutes(1), 50),

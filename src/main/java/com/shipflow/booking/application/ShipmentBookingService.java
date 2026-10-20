@@ -69,6 +69,12 @@ public class ShipmentBookingService {
 
     @Transactional
     public Booked createAndAllocate(UUID merchantId, CreateShipmentRequest req, String source, String actor) {
+        return createAndAllocate(merchantId, req, source, actor, AllocationService.Reservation.FIRST);
+    }
+
+    @Transactional
+    public Booked createAndAllocate(UUID merchantId, CreateShipmentRequest req, String source, String actor,
+                                    AllocationService.Reservation reservation) {
         PincodeInfo pin = network.pincode(req.consignee().pincode()).orElseThrow(() -> new ShipFlowException(
                 ErrorCode.UNSERVICEABLE, "destination pincode " + req.consignee().pincode() + " is not serviceable"));
         HubInfo origin = network.hub(req.originHubCode()).orElseThrow(() -> new ShipFlowException(
@@ -112,7 +118,7 @@ public class ShipmentBookingService {
         data.put("riskBand", assessment.band());
         data.put("riskActions", assessment.actions());
         outbox.write(merchantId, id, "shipment.created", data);
-        var result = allocation.allocate(s, Set.of(), actor, "BOOKING");
+        var result = allocation.allocate(s, Set.of(), actor, "BOOKING", reservation);
         shipments.flush();
         metrics.shipmentBooked(source);
         return new Booked(id, result.summary());

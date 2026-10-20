@@ -95,6 +95,7 @@
                 <bench.db.url>jdbc:postgresql://localhost:5432/shipflow_bench</bench.db.url>
                 <bench.db.user>postgres</bench.db.user>
                 <bench.out>docs/benchmark-results</bench.out>
+                <bench.reserveLast>true</bench.reserveLast>
             </properties>
             <build>
                 <plugins>
@@ -117,6 +118,7 @@
                                 <argument>-Dbench.db.url=${bench.db.url}</argument>
                                 <argument>-Dbench.db.user=${bench.db.user}</argument>
                                 <argument>-Dbench.out=${bench.out}</argument>
+                                <argument>-Dbench.reserveLast=${bench.reserveLast}</argument>
                                 <argument>-classpath</argument>
                                 <classpath/>
                                 <argument>com.shipflow.bench.ShipFlowBenchmark</argument>

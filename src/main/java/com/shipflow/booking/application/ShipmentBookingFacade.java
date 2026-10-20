@@ -1,7 +1,9 @@
 package com.shipflow.booking.application;
 
 import com.shipflow.booking.api.CreateShipmentRequest;
+import com.shipflow.allocation.application.AllocationService;
 import com.shipflow.booking.carrier.BookingOrchestrator;
+import com.shipflow.config.ShipFlowProperties;
 import com.shipflow.idempotency.IdempotencyService;
 import com.shipflow.idempotency.RequestHasher;
 import com.shipflow.security.Actor;
@@ -24,9 +26,11 @@ public class ShipmentBookingFacade {
     private final RequestHasher hasher;
     private final ShipmentBookingService booking;
     private final BookingOrchestrator orchestrator;
+    private final ShipFlowProperties.Allocation allocation;
 
     public ShipmentBookingFacade(IdempotencyService idempotency, RequestHasher hasher, ShipmentBookingService booking,
-                                 BookingOrchestrator orchestrator) {
+                                 BookingOrchestrator orchestrator, ShipFlowProperties props) {
+        this.allocation = props.allocation();
         this.idempotency = idempotency;
         this.hasher = hasher;
         this.booking = booking;
@@ -37,8 +41,11 @@ public class ShipmentBookingFacade {
                          String source, Object rawPayloadForHash) {
         var req = new IdempotencyService.Request(merchantId.toString(), idempotencyKey, OPERATION + ":" + source,
                 hasher.hash(rawPayloadForHash == null ? request : rawPayloadForHash));
-        var outcome = idempotency.execute(req, () -> new IdempotencyService.Created(
-                booking.createAndAllocate(merchantId, request, source, actor.subject()).shipmentId(), 201));
+        int attempts = allocation.reserveLast() ? Math.max(1, allocation.optimisticAttempts()) + 1 : 1;
+        var outcome = idempotency.execute(req, attempts, attempt -> new IdempotencyService.Created(
+                booking.createAndAllocate(merchantId, request, source, actor.subject(),
+                        attempt < attempts ? AllocationService.Reservation.LAST : AllocationService.Reservation.FIRST)
+                        .shipmentId(), 201));
         if (!outcome.replayed()) {
             orchestrator.book(outcome.resourceId(), actor.subject());
         }

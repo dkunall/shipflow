@@ -85,6 +85,8 @@ shipflow:
       first-attempt: 0.10
       rto: 0.10
     max-failovers: 3
+    reserve-last: true
+    optimistic-attempts: 3
   scorecard:
     window-days: 30
     # Bayesian smoothing: a carrier with few outcomes is pulled towards the prior instead of 0% / 100%

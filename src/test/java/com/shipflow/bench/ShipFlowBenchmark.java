@@ -91,6 +91,7 @@ public final class ShipFlowBenchmark {
             .map(String::trim).mapToInt(Integer::parseInt).toArray();
     private static final String OUT = System.getProperty("bench.out", "docs/benchmark-results");
     private static final int PINCODES = 40;
+    private static final boolean RESERVE_LAST = Boolean.parseBoolean(System.getProperty("bench.reserveLast", "true"));
 
     private ConfigurableApplicationContext ctx;
     private JdbcTemplate jdbc;
@@ -163,6 +164,7 @@ public final class ShipFlowBenchmark {
         props.put("spring.datasource.hikari.register-mbeans", true);
         props.put("shipflow.jwt.secret", HexFormat.of().formatHex(secret));
         props.put("shipflow.scheduling.enabled", false);
+        props.put("shipflow.allocation.reserve-last", RESERVE_LAST);
         props.put("server.port", 0);
         props.put("logging.level.root", "WARN");
         props.put("logging.level.com.shipflow", "ERROR");
@@ -235,7 +237,7 @@ public final class ShipFlowBenchmark {
     }
 
     private Actor actor() {
-        return new Actor("bench", Set.of(Role.MERCHANT), Optional.of(merchant));
+        return new Actor("bench-merchant", Set.of(Role.MERCHANT), Optional.of(merchant));
     }
 
     private void header() throws Exception {
@@ -255,7 +257,7 @@ public final class ShipFlowBenchmark {
                 + ", max heap " + Runtime.getRuntime().maxMemory() / (1024 * 1024) + " MB");
         line("- PostgreSQL: " + pg + " (same host as the JVM)");
         line("- PG settings: " + settings);
-        line("- Hikari maximum-pool-size: " + POOL);
+        line("- Hikari maximum-pool-size: " + POOL + "; allocation reserve-last: " + RESERVE_LAST);
         line("- Warm-up " + WARMUP + " s, then " + RUNS + " measured runs x " + RUN + " s per configuration; fresh data per run");
         line("");
     }
@@ -298,6 +300,8 @@ public final class ShipFlowBenchmark {
         line("");
     }
 
+    private long racesSeen;
+
     private Map<String, Long> bookingInvariants() {
         Map<String, Long> m = new LinkedHashMap<>();
         m.put("overbooked", jdbc.queryForObject("SELECT count(*) FROM carrier_capacity WHERE reserved > capacity", Long.class));
@@ -305,6 +309,11 @@ public final class ShipFlowBenchmark {
         long decisions = jdbc.queryForObject("SELECT count(*) FROM allocation_decision WHERE outcome = 'RESERVED'", Long.class);
         m.put("alloc!=reserved", Math.abs(reserved - decisions));
         m.put("unconfirmed", jdbc.queryForObject("SELECT count(*) FROM shipment WHERE status='ALLOCATED' AND carrier_awb IS NULL", Long.class));
+        long races = (long) ctx.getBean(io.micrometer.core.instrument.MeterRegistry.class)
+                .find("shipflow.allocations").tag("result", "race_lost").counters().stream()
+                .mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
+        m.put("raceRetries", races - racesSeen);
+        racesSeen = races;
         m.put("dupConsignments", jdbc.queryForObject("""
                 SELECT count(*) FROM (SELECT shipment_id FROM carrier_booking WHERE status='CONFIRMED'
                  GROUP BY shipment_id HAVING count(*) > 1) x""", Long.class));

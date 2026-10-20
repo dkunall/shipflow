@@ -22,7 +22,11 @@ public record ShipFlowProperties(Jwt jwt, Scheduling scheduling, Idempotency ide
     public record Idempotency(Duration ttl, Duration inProgressTimeout) {
     }
 
-    public record Allocation(Map<String, Double> weights, int maxFailovers) {
+    /**
+     * @param reserveLast        optimistic reserve-last allocation for bookings (see AllocationService.Reservation)
+     * @param optimisticAttempts reserve-last attempts before the final pessimistic (reserve-first) attempt
+     */
+    public record Allocation(Map<String, Double> weights, int maxFailovers, boolean reserveLast, int optimisticAttempts) {
         public double weight(String rule) {
             return weights == null ? 0.0 : weights.getOrDefault(rule, 0.0);
         }
