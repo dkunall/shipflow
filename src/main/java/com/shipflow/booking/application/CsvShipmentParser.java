@@ -66,15 +66,26 @@ public final class CsvShipmentParser {
 
     private static CreateShipmentRequest toRequest(Map<String, String> m) {
         String currency = m.get("currency");
-        PaymentMode mode = PaymentMode.valueOf(require(m, "payment_mode").toUpperCase(Locale.ROOT));
-        MoneyDto cod = m.get("cod_amount") == null ? null : new MoneyDto(new BigDecimal(m.get("cod_amount")), currency);
+        PaymentMode mode = parse(m, "payment_mode", v -> PaymentMode.valueOf(v.toUpperCase(Locale.ROOT)));
+        MoneyDto cod = m.get("cod_amount") == null ? null
+                : new MoneyDto(parse(m, "cod_amount", BigDecimal::new), currency);
         return new CreateShipmentRequest(m.get("merchant_order_ref"), m.get("origin_hub"),
                 new ConsigneeDto(m.get("name"), m.get("phone"), m.get("address_line1"), m.get("address_line2"),
                         m.get("landmark"), m.get("city"), m.get("pincode"),
-                        m.get("lat") == null ? null : Double.valueOf(m.get("lat")),
-                        m.get("lng") == null ? null : Double.valueOf(m.get("lng"))),
-                Integer.valueOf(require(m, "weight_g")), mode, cod,
-                new MoneyDto(new BigDecimal(require(m, "declared_value")), currency));
+                        m.get("lat") == null ? null : parse(m, "lat", Double::valueOf),
+                        m.get("lng") == null ? null : parse(m, "lng", Double::valueOf)),
+                parse(m, "weight_g", Integer::valueOf), mode, cod,
+                new MoneyDto(parse(m, "declared_value", BigDecimal::new), currency));
+    }
+
+    /** Parses a required column, naming the column in the error so the merchant can fix the row. */
+    private static <T> T parse(Map<String, String> m, String column, java.util.function.Function<String, T> parser) {
+        String v = require(m, column);
+        try {
+            return parser.apply(v);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(column + ": invalid value '" + v + "'");
+        }
     }
 
     private static String require(Map<String, String> m, String k) {
