@@ -86,8 +86,9 @@ public class CarrierBookingRepository {
                 """, this::map, shipmentId);
     }
 
+    /** Carriers this shipment must not be re-allocated to: their booking failed or was cancelled (ref is burnt). */
     public Set<Long> failedCarriers(UUID shipmentId) {
-        return jdbc.queryForList("SELECT carrier_id FROM carrier_booking WHERE shipment_id = ? AND status = 'FAILED'",
+        return jdbc.queryForList("SELECT carrier_id FROM carrier_booking WHERE shipment_id = ? AND status IN ('FAILED','CANCELLED')",
                 Long.class, shipmentId).stream().collect(Collectors.toSet());
     }
 

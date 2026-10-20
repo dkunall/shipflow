@@ -8,6 +8,7 @@ import com.shipflow.booking.carrier.BookingOrchestrator;
 import com.shipflow.booking.carrier.CarrierBookingRepository;
 import com.shipflow.carrier.CarrierDirectory;
 import com.shipflow.carrier.resilience.CarrierGateway;
+import com.shipflow.common.error.ErrorCode;
 import com.shipflow.common.error.ShipFlowException;
 import com.shipflow.security.Actor;
 import com.shipflow.shipment.domain.Shipment;
@@ -18,6 +19,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -73,16 +75,36 @@ public class ShipmentCommandService {
         return o.s();
     }
 
-    /** Ops: retry allocation for a shipment that is still CREATED (e.g. no capacity earlier). */
-    public Shipment reallocate(Actor actor, UUID id) {
-        tx.executeWithoutResult(st -> {
+    /**
+     * Ops: re-run allocation. CREATED (e.g. no capacity earlier) or ALLOCATED-but-not-picked-up (e.g. carrier
+     * strike): the current reservation is released, the active carrier booking cancelled (carrier told after commit)
+     * and the shipment re-allocated excluding the given carriers plus any whose booking already failed/was cancelled.
+     */
+    public Shipment reallocate(Actor actor, UUID id, Set<String> excludeCarrierCodes, String reason) {
+        record Outcome(Optional<CarrierBookingRepository.Booking> cancelled) {
+        }
+        Outcome o = tx.execute(st -> {
             Shipment s = load(actor, id);
-            if (s.getStatus() != ShipmentStatus.CREATED) {
-                throw ShipFlowException.unprocessable("only CREATED (unallocated) shipments can be re-allocated");
+            if (s.getStatus() != ShipmentStatus.CREATED && s.getStatus() != ShipmentStatus.ALLOCATED) {
+                throw new ShipFlowException(ErrorCode.INVALID_STATE_TRANSITION,
+                        "only CREATED or ALLOCATED shipments can be re-allocated (is " + s.getStatus() + ")");
             }
-            allocation.allocate(s, Set.of(), actor.subject(), "MANUAL_REALLOCATION");
+            Set<Long> excluded = new HashSet<>();
+            for (String code : excludeCarrierCodes) {
+                excluded.add(carriers.requireCode(code).id());
+            }
+            Optional<CarrierBookingRepository.Booking> cancelled = Optional.empty();
+            if (s.getStatus() == ShipmentStatus.ALLOCATED) {
+                allocation.releaseReservation(s, "manual re-allocation" + (reason == null ? "" : ": " + reason));
+                cancelled = bookings.cancelActive(s.getId(), clock.instant());
+            }
+            excluded.addAll(bookings.failedCarriers(s.getId()));
+            allocation.allocate(s, excluded, actor.subject(),
+                    "MANUAL_REALLOCATION" + (reason == null ? "" : " (" + reason + ")"));
             shipments.flush();
+            return new Outcome(cancelled);
         });
+        o.cancelled().ifPresent(b -> gateway.cancelQuietly(carriers.require(b.carrierId()), b.bookingRef()));
         orchestrator.book(id, actor.subject());
         return shipments.findById(id).orElseThrow();
     }

@@ -48,6 +48,9 @@ public class EddService {
         m.put("transitSource", r.transitSource());
         m.put("carrierSlaDays", slaDays);
         m.put("laneSamples", r.laneSamples());
+        // weekend/holiday days between dispatch and promise that did not count as transit days
+        m.put("nonWorkingDaysSkipped",
+                java.time.temporal.ChronoUnit.DAYS.between(r.dispatchDate(), r.promisedDate()) - r.transitDays());
         m.put("promisedDate", r.promisedDate().toString());
         try {
             return mapper.writeValueAsString(m);

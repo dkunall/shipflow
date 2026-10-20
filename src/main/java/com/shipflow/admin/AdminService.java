@@ -59,7 +59,7 @@ public class AdminService {
                     RETURNING id
                     """, Long.class, r.code(), r.name(), r.kind(), r.integration(), secret);
         } catch (DuplicateKeyException e) {
-            throw new ShipFlowException(ErrorCode.UNPROCESSABLE, "carrier " + r.code() + " already exists");
+            throw new ShipFlowException(ErrorCode.ALREADY_EXISTS, "carrier " + r.code() + " already exists");
         }
         for (var z : r.zones()) {
             jdbc.update("""

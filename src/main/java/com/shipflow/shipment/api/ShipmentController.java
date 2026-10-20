@@ -17,6 +17,7 @@ import com.shipflow.shipment.persistence.ShipmentHistoryRepository;
 import com.shipflow.shipment.persistence.ShipmentQueryRepository;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -32,6 +33,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -39,6 +41,9 @@ import java.util.UUID;
 @Validated
 public class ShipmentController {
     public record ReasonRequest(@Size(max = 200) String reason) {
+    }
+
+    public record ReallocateRequest(@Size(max = 200) String reason, @Size(max = 20) List<String> excludeCarriers) {
     }
 
     private final ShipmentCommandService commands;
@@ -143,8 +148,10 @@ public class ShipmentController {
 
     @PostMapping("/{id}/reallocate")
     @PreAuthorize("hasAnyRole('OPS','ADMIN')")
-    public ShipmentView reallocate(@PathVariable UUID id) {
-        return views.of(commands.reallocate(Actor.current(), id));
+    public ShipmentView reallocate(@PathVariable UUID id, @Valid @RequestBody(required = false) ReallocateRequest body) {
+        return views.of(commands.reallocate(Actor.current(), id,
+                body == null || body.excludeCarriers() == null ? Set.of() : Set.copyOf(body.excludeCarriers()),
+                body == null ? null : body.reason()));
     }
 
     @PostMapping("/{id}/rto")
