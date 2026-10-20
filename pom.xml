@@ -94,7 +94,6 @@
                 <bench.scenarios>booking,scan,routing</bench.scenarios>
                 <bench.db.url>jdbc:postgresql://localhost:5432/shipflow_bench</bench.db.url>
                 <bench.db.user>postgres</bench.db.user>
-                <bench.db.password>postgres</bench.db.password>
                 <bench.out>docs/benchmark-results</bench.out>
             </properties>
             <build>
@@ -117,7 +116,6 @@
                                 <argument>-Dbench.scenarios=${bench.scenarios}</argument>
                                 <argument>-Dbench.db.url=${bench.db.url}</argument>
                                 <argument>-Dbench.db.user=${bench.db.user}</argument>
-                                <argument>-Dbench.db.password=${bench.db.password}</argument>
                                 <argument>-Dbench.out=${bench.out}</argument>
                                 <argument>-classpath</argument>
                                 <classpath/>
