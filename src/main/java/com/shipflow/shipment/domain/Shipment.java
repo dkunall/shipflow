@@ -5,10 +5,14 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
+import jakarta.persistence.Transient;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import org.springframework.data.domain.Persistable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -22,7 +26,11 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "shipment")
-public class Shipment {
+public class Shipment implements Persistable<UUID> {
+
+    /** Spring Data uses this (not the version getter) to choose persist vs merge: new aggregates are a plain INSERT. */
+    @Transient
+    private boolean fresh;
 
     @Id
     private UUID id;
@@ -119,6 +127,7 @@ public class Shipment {
     /** Factory for a freshly booked shipment (status CREATED). */
     public static Shipment book(NewShipment n, Instant now) {
         Shipment s = new Shipment();
+        s.fresh = true;
         s.id = Objects.requireNonNull(n.id());
         s.merchantId = n.merchantId();
         s.merchantOrderRef = n.merchantOrderRef();
@@ -223,7 +232,15 @@ public class Shipment {
         return paymentMode == PaymentMode.COD;
     }
 
+    @Override
     public UUID getId() { return id; }
+
+    @Override
+    public boolean isNew() { return fresh; }
+
+    @PostPersist
+    @PostLoad
+    void markPersisted() { this.fresh = false; }
     public UUID getMerchantId() { return merchantId; }
     public String getMerchantOrderRef() { return merchantOrderRef; }
     public String getTrackingNumber() { return trackingNumber; }
