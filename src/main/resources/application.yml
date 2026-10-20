@@ -72,6 +72,10 @@ shipflow:
     issuer: ${JWT_ISSUER:}
   scheduling:
     enabled: ${SHIPFLOW_SCHEDULING_ENABLED:true}
+  # write-behind statistics (ADR-011): outcome log folded into scorecard/lane/risk counters
+  stats:
+    flush-interval: PT1S
+    batch-size: 5000
   idempotency:
     ttl: PT24H
     in-progress-timeout: PT1M

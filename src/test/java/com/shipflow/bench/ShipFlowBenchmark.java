@@ -333,7 +333,7 @@ public final class ShipFlowBenchmark {
         line("");
         line("Pre-created ALLOCATED shipments (one template booked through the real path, cloned with SQL for speed). "
                 + "Each thread walks its own shipments through 5 scans; ~10% of scans are re-sent duplicates. "
-                + "Each op = one `ScanIngestionService.ingest`. DELIVERED triggers NDR/scorecard/lane-lead-time listeners and an outbox row.");
+                + "Each op = one `ScanIngestionService.ingest`. DELIVERED records the NDR attempt, appends a delivery_outcome row (write-behind stats) and an outbox row.");
         line("");
         line("Statistics are write-behind: like the production scheduler, a background thread folds `delivery_outcome` "
                 + "into the scorecard/lane/risk counters every 1 s during the run (its DB work competes with the scans).");

@@ -1,0 +1,21 @@
+# Local PostgreSQL 17 for ShipFlow (app DB + integration-test DB + benchmark DB).
+# The password below is a throwaway local-dev value; override with POSTGRES_PASSWORD for anything shared.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: shipflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+      - shipflow-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  shipflow-pg:
