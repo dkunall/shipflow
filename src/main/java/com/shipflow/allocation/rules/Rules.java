@@ -15,7 +15,7 @@ public final class Rules {
     private Rules() {
     }
 
-    /** Cheapest total (freight + COD fee) scores 1, most expensive 0 (min-max normalised). */
+    /** Cheapest total (freight + COD fee) scores 1; others cheapest/own price (ratio, not min-max). */
     @Component
     @Order(10)
     public static class CostRule implements AllocationRule {
@@ -24,13 +24,13 @@ public final class Rules {
         }
 
         public double score(PricedCandidate c, CandidatePool pool, AllocationContext ctx) {
-            BigDecimal min = pool.minPrice();
-            BigDecimal range = pool.maxPrice().subtract(min);
-            if (range.signum() == 0) {
+            // ratio to the cheapest (not min-max): a 5% dearer carrier scores 0.952, not 0, so small price gaps
+            // cannot drown out quality signals
+            BigDecimal price = c.quote().total().amount();
+            if (price.signum() <= 0) {
                 return 1.0;
             }
-            BigDecimal over = c.quote().total().amount().subtract(min);
-            return 1.0 - over.divide(range, MathContext.DECIMAL64).doubleValue();
+            return pool.minPrice().max(BigDecimal.ZERO).divide(price, MathContext.DECIMAL64).doubleValue();
         }
 
         public String detail(PricedCandidate c) {
@@ -39,7 +39,7 @@ public final class Rules {
         }
     }
 
-    /** Fastest SLA scores 1, slowest 0. */
+    /** Fastest SLA scores 1; others proportionally less (fastest / own). */
     @Component
     @Order(20)
     public static class SlaRule implements AllocationRule {
@@ -48,8 +48,8 @@ public final class Rules {
         }
 
         public double score(PricedCandidate c, CandidatePool pool, AllocationContext ctx) {
-            int range = pool.maxSla() - pool.minSla();
-            return range == 0 ? 1.0 : (double) (pool.maxSla() - c.candidate().slaDays()) / range;
+            // ratio to the fastest SLA: 2d vs 1d scores 0.5, 3d vs 2d scores 0.667
+            return (double) Math.max(1, pool.minSla()) / Math.max(1, c.candidate().slaDays());
         }
 
         public String detail(PricedCandidate c) {
