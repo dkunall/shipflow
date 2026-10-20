@@ -54,6 +54,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -97,6 +100,7 @@ public final class ShipFlowBenchmark {
     private JdbcTemplate jdbc;
     private ShipmentBookingFacade facade;
     private ScanIngestionService scans;
+    private com.shipflow.stats.StatsAggregator statsAggregator;
     private SimulatedCarrierNetwork simulator;
     private HikariDataSource pool;
     private UUID merchant;
@@ -175,6 +179,7 @@ public final class ShipFlowBenchmark {
         jdbc = ctx.getBean(JdbcTemplate.class);
         facade = ctx.getBean(ShipmentBookingFacade.class);
         scans = ctx.getBean(ScanIngestionService.class);
+        statsAggregator = ctx.getBean(com.shipflow.stats.StatsAggregator.class);
         simulator = ctx.getBean(SimulatedCarrierNetwork.class);
         pool = ctx.getBean(HikariDataSource.class);
     }
@@ -182,7 +187,7 @@ public final class ShipFlowBenchmark {
     /** Fresh network: 1 hub, 1 zone, 40 pincodes, 4 carriers (different price/SLA), 1 merchant with a webhook URL. */
     private void reset(int capacityPerCarrier) {
         jdbc.execute("""
-                TRUNCATE route_stop, route_plan, rider, webhook_attempt, webhook_dead_letter, outbox_event,
+                TRUNCATE delivery_outcome, route_stop, route_plan, rider, webhook_attempt, webhook_dead_letter, outbox_event,
                          idempotency_record, cod_reconciliation_result, cod_reconciliation_run, cod_remittance_line,
                          cod_remittance, customer_delivery_stats, pincode_delivery_stats, lane_lead_time,
                          carrier_scorecard_daily, delivery_attempt, scan_event, carrier_booking, allocation_decision,
@@ -330,7 +335,13 @@ public final class ShipFlowBenchmark {
                 + "Each thread walks its own shipments through 5 scans; ~10% of scans are re-sent duplicates. "
                 + "Each op = one `ScanIngestionService.ingest`. DELIVERED triggers NDR/scorecard/lane-lead-time listeners and an outbox row.");
         line("");
+        line("Statistics are write-behind: like the production scheduler, a background thread folds `delivery_outcome` "
+                + "into the scorecard/lane/risk counters every 1 s during the run (its DB work competes with the scans).");
+        line("");
         tableHeader();
+        ScheduledExecutorService flusher = Executors.newSingleThreadScheduledExecutor();
+        flusher.scheduleWithFixedDelay(this::flushStats, 1, 1, TimeUnit.SECONDS);
+        try {
         for (int threads : THREADS) {
             List<RunResult> runs = measure(() -> {
                 reset(10_000_000);
@@ -368,10 +379,24 @@ public final class ShipFlowBenchmark {
             tableRows("scan ingest", threads, runs);
             summary.put("scan ingest, " + threads + " threads: ops/s | p50 | p95 | p99 ms", medians(runs));
         }
+        } finally {
+            flusher.shutdownNow();
+            flusher.awaitTermination(30, TimeUnit.SECONDS);
+        }
         line("");
         line("Invariant columns: `dupEffects` = scan events stored twice for one (carrier, event id) (must be 0); "
-                + "`historyMismatch` = applied non-duplicate scans without exactly one history row (must be 0).");
+                + "`historyMismatch` = applied non-duplicate scans without exactly one history row (must be 0); "
+                + "`statsMismatch` = |scorecard delivered + pending outcomes - DELIVERED shipments| after a final flush (must be 0).");
         line("");
+    }
+
+    /** Serialised so the invariant check never races a scheduled flush that has claimed rows but not yet committed. */
+    private synchronized void flushStats() {
+        try {
+            statsAggregator.drainAll();
+        } catch (RuntimeException e) {
+            System.err.println("stats flush failed: " + e);
+        }
     }
 
     private Map<String, Long> scanInvariants() {
@@ -381,7 +406,11 @@ public final class ShipFlowBenchmark {
         long applied = jdbc.queryForObject("SELECT count(*) FROM scan_event WHERE outcome = 'APPLIED'", Long.class);
         long history = jdbc.queryForObject("SELECT count(*) FROM shipment_status_history WHERE actor = 'bench'", Long.class);
         m.put("historyMismatch", Math.abs(applied - history));
-        m.put("delivered", jdbc.queryForObject("SELECT count(*) FROM shipment WHERE status = 'DELIVERED'", Long.class));
+        long delivered = jdbc.queryForObject("SELECT count(*) FROM shipment WHERE status = 'DELIVERED'", Long.class);
+        m.put("delivered", delivered);
+        flushStats();
+        long folded = jdbc.queryForObject("SELECT coalesce(sum(delivered),0) FROM carrier_scorecard_daily", Long.class);
+        m.put("statsMismatch", Math.abs(folded - delivered));
         return m;
     }
 

@@ -48,6 +48,9 @@ class ScanIngestionIT extends AbstractPostgresIT {
         assertThat(statusOf(id)).isEqualTo("DELIVERED");
         assertThat(count("SELECT count(*) FROM delivery_attempt WHERE shipment_id = ?::uuid AND outcome = 'DELIVERED'", id))
                 .isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM delivery_outcome WHERE outcome = 'DELIVERED'")).isEqualTo(1);
+        flushStats();
+        assertThat(count("SELECT count(*) FROM delivery_outcome")).isZero();
         assertThat(count("SELECT coalesce(sum(delivered),0) FROM carrier_scorecard_daily")).isEqualTo(1);
         // terminal: nothing moves it any more
         JsonNode late = scanOk("FAST", "e3", trk, "IN_TRANSIT", t(30), null);
@@ -126,6 +129,7 @@ class ScanIngestionIT extends AbstractPostgresIT {
         scanOk("FAST", "rto-1", trk, "RTO_IN_TRANSIT", t(m += 10), null);
         scanOk("FAST", "rto-2", trk, "RTO_DELIVERED", t(m += 10), null);
         assertThat(statusOf(id)).isEqualTo("RTO_DELIVERED");
+        flushStats();
         assertThat(count("SELECT coalesce(sum(rto),0) FROM carrier_scorecard_daily")).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM outbox_event WHERE event_type = 'shipment.ndr'")).isZero(); // no webhook url
 

@@ -1,9 +1,12 @@
 package com.shipflow.scorecard;
 
+import com.shipflow.stats.StatsDeltas;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Date;
+import java.util.Map;
+import java.util.ArrayList;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -16,23 +19,23 @@ public class ScorecardRepository {
         this.jdbc = jdbc;
     }
 
-    public void recordDelivered(long carrierId, String zone, LocalDate day, boolean onTime, boolean firstAttempt) {
-        jdbc.update("""
+    /** Applies pre-aggregated increments (one UPSERT per carrier/zone/day; keys arrive sorted). */
+    public void add(Map<StatsDeltas.ScorecardKey, StatsDeltas.Scorecard> deltas) {
+        if (deltas.isEmpty()) {
+            return;
+        }
+        List<Object[]> args = new ArrayList<>(deltas.size());
+        deltas.forEach((k, v) -> args.add(new Object[]{k.carrierId(), k.zone(), Date.valueOf(k.day()), v.delivered(),
+                v.onTime(), v.firstAttempt(), v.rto()}));
+        jdbc.batchUpdate("""
                 INSERT INTO carrier_scorecard_daily (carrier_id, zone_code, day, delivered, on_time, first_attempt, rto)
-                VALUES (?, ?, ?, 1, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (carrier_id, zone_code, day) DO UPDATE SET
-                    delivered = carrier_scorecard_daily.delivered + 1,
+                    delivered = carrier_scorecard_daily.delivered + EXCLUDED.delivered,
                     on_time = carrier_scorecard_daily.on_time + EXCLUDED.on_time,
-                    first_attempt = carrier_scorecard_daily.first_attempt + EXCLUDED.first_attempt
-                """, carrierId, zone, Date.valueOf(day), onTime ? 1 : 0, firstAttempt ? 1 : 0);
-    }
-
-    public void recordRto(long carrierId, String zone, LocalDate day) {
-        jdbc.update("""
-                INSERT INTO carrier_scorecard_daily (carrier_id, zone_code, day, delivered, on_time, first_attempt, rto)
-                VALUES (?, ?, ?, 0, 0, 0, 1)
-                ON CONFLICT (carrier_id, zone_code, day) DO UPDATE SET rto = carrier_scorecard_daily.rto + 1
-                """, carrierId, zone, Date.valueOf(day));
+                    first_attempt = carrier_scorecard_daily.first_attempt + EXCLUDED.first_attempt,
+                    rto = carrier_scorecard_daily.rto + EXCLUDED.rto
+                """, args);
     }
 
     public record Totals(long delivered, long onTime, long firstAttempt, long rto) {

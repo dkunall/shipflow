@@ -53,6 +53,7 @@ public abstract class AbstractPostgresIT {
     @Autowired protected MockMvc mvc;
     @Autowired protected ObjectMapper mapper;
     @Autowired protected JdbcTemplate jdbc;
+    @Autowired protected com.shipflow.stats.StatsAggregator statsAggregator;
     @Autowired protected SimulatedCarrierNetwork simulator;
     @Autowired protected CircuitBreakerRegistry breakers;
     @Autowired protected CarrierDirectory carrierDirectory;
@@ -75,7 +76,7 @@ public abstract class AbstractPostgresIT {
     @BeforeEach
     void resetState() {
         jdbc.execute("""
-                TRUNCATE route_stop, route_plan, rider, webhook_attempt, webhook_dead_letter, outbox_event,
+                TRUNCATE delivery_outcome, route_stop, route_plan, rider, webhook_attempt, webhook_dead_letter, outbox_event,
                          idempotency_record, cod_reconciliation_result, cod_reconciliation_run, cod_remittance_line,
                          cod_remittance, customer_delivery_stats, pincode_delivery_stats, lane_lead_time,
                          carrier_scorecard_daily, delivery_attempt, scan_event, carrier_booking, allocation_decision,
@@ -237,5 +238,10 @@ public abstract class AbstractPostgresIT {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    /** Statistics are write-behind (the scheduler is off in tests): fold pending outcomes now. */
+    protected void flushStats() {
+        statsAggregator.drainAll();
     }
 }

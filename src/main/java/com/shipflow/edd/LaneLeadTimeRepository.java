@@ -1,9 +1,12 @@
 package com.shipflow.edd;
 
+import com.shipflow.stats.StatsDeltas;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 
 @Repository
@@ -23,12 +26,17 @@ public class LaneLeadTimeRepository {
         return LeadTimeHistogram.of(buckets);
     }
 
-    public void record(long carrierId, long originHubId, String zone, int leadDays) {
-        jdbc.update("""
+    public void add(Map<StatsDeltas.LaneKey, Integer> samples) {
+        if (samples.isEmpty()) {
+            return;
+        }
+        List<Object[]> args = new ArrayList<>(samples.size());
+        samples.forEach((k, n) -> args.add(new Object[]{k.carrierId(), k.originHubId(), k.zone(), k.leadDays(), n}));
+        jdbc.batchUpdate("""
                 INSERT INTO lane_lead_time (carrier_id, origin_hub_id, zone_code, lead_days, samples)
-                VALUES (?, ?, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (carrier_id, origin_hub_id, zone_code, lead_days)
-                DO UPDATE SET samples = lane_lead_time.samples + 1
-                """, carrierId, originHubId, zone, leadDays);
+                DO UPDATE SET samples = lane_lead_time.samples + EXCLUDED.samples
+                """, args);
     }
 }

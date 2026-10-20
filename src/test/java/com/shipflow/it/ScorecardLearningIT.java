@@ -48,6 +48,7 @@ class ScorecardLearningIT extends AbstractPostgresIT {
             scanOk("BRAVO", "b" + e++, trk, "OUT_FOR_DELIVERY", t, null);
             scanOk("BRAVO", "b" + e++, trk, "DELIVERED", t.plusSeconds(60), null);
         }
+        flushStats();
         JsonNode card = body(mvc.perform(get("/api/v1/admin/carriers/ALPHA/scorecard").param("zone", ZONE)
                 .header("Authorization", TestJwt.admin())).andExpect(status().isOk()));
         assertThat(card.get("raw").get("rto").asInt()).isEqualTo(alpha.size());
