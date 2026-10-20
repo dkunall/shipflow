@@ -134,3 +134,7 @@ logging:
     console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} level=%-5level thread=%thread corr=%X{correlationId:-} logger=%logger{36} msg=\"%msg\"%n"
   level:
     com.shipflow: INFO
+    # Constraint violations are translated to RFC 7807 responses; Hibernate's own error logging would print bound
+    # parameter values (consignee PII) from the failed batch, so it is silenced.
+    org.hibernate.orm.jdbc.batch: "OFF"
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: "OFF"
