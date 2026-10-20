@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.shipflow</groupId>
+    <artifactId>shipflow</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <name>shipflow</name>
+    <description>Carrier-allocation and last-mile delivery management engine (modular monolith)</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <testcontainers.version>1.20.3</testcontainers.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-oauth2-resource-server</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-actuator</artifactId></dependency>
+        <dependency><groupId>io.micrometer</groupId><artifactId>micrometer-registry-prometheus</artifactId></dependency>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-core</artifactId></dependency>
+        <dependency><groupId>org.flywaydb</groupId><artifactId>flyway-database-postgresql</artifactId></dependency>
+        <dependency><groupId>org.postgresql</groupId><artifactId>postgresql</artifactId><scope>runtime</scope></dependency>
+        <dependency><groupId>net.logstash.logback</groupId><artifactId>logstash-logback-encoder</artifactId><version>7.4</version></dependency>
+
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+        <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-test</artifactId><scope>test</scope></dependency>
+        <dependency><groupId>org.testcontainers</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+        <dependency><groupId>org.testcontainers</groupId><artifactId>postgresql</artifactId><scope>test</scope></dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes><exclude>**/*IT.java</exclude></excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <includes><include>**/*IT.java</include></includes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals><goal>integration-test</goal><goal>verify</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Load benchmark against a real local PostgreSQL (not part of the normal build). See docs/PERFORMANCE.md -->
+        <profile>
+            <id>benchmark</id>
+            <properties>
+                <bench.pool>20</bench.pool>
+                <bench.warmupSec>5</bench.warmupSec>
+                <bench.runSec>10</bench.runSec>
+                <bench.runs>3</bench.runs>
+                <bench.threads>50,100,200</bench.threads>
+                <bench.scenarios>booking,scan,routing</bench.scenarios>
+                <bench.db.url>jdbc:postgresql://localhost:5432/shipflow_bench</bench.db.url>
+                <bench.db.user>postgres</bench.db.user>
+                <bench.db.password>postgres</bench.db.password>
+                <bench.out>docs/benchmark-results</bench.out>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <configuration>
+                            <executable>java</executable>
+                            <classpathScope>test</classpathScope>
+                            <arguments>
+                                <argument>-Xms2g</argument>
+                                <argument>-Xmx2g</argument>
+                                <argument>-Dbench.pool=${bench.pool}</argument>
+                                <argument>-Dbench.warmupSec=${bench.warmupSec}</argument>
+                                <argument>-Dbench.runSec=${bench.runSec}</argument>
+                                <argument>-Dbench.runs=${bench.runs}</argument>
+                                <argument>-Dbench.threads=${bench.threads}</argument>
+                                <argument>-Dbench.scenarios=${bench.scenarios}</argument>
+                                <argument>-Dbench.db.url=${bench.db.url}</argument>
+                                <argument>-Dbench.db.user=${bench.db.user}</argument>
+                                <argument>-Dbench.db.password=${bench.db.password}</argument>
+                                <argument>-Dbench.out=${bench.out}</argument>
+                                <argument>-classpath</argument>
+                                <classpath/>
+                                <argument>com.shipflow.bench.ShipFlowBenchmark</argument>
+                            </arguments>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

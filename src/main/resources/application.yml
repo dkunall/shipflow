@@ -1,0 +1,136 @@
+spring:
+  application:
+    name: shipflow
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/shipflow}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:}
+    hikari:
+      pool-name: shipflow-pool
+      # Sized for an 8 vCPU box with the DB co-located: ~2-3x cores. More connections only add contention.
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1800000
+      # never queue forever behind a row lock / runaway statement
+      connection-init-sql: "SET lock_timeout = '3s'; SET statement_timeout = '15s'"
+      data-source-properties:
+        reWriteBatchedInserts: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  mvc:
+    problemdetails:
+      enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when_authorized
+      roles: ADMIN
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+shipflow:
+  jwt:
+    # REQUIRED (>= 32 bytes). Supplied via env JWT_SECRET; only the 'dev' and 'test' profiles define a throwaway value.
+    secret: ${JWT_SECRET:}
+    issuer: ${JWT_ISSUER:}
+  scheduling:
+    enabled: ${SHIPFLOW_SCHEDULING_ENABLED:true}
+  idempotency:
+    ttl: PT24H
+    in-progress-timeout: PT1M
+  allocation:
+    # weights of the scoring rules (0 disables a rule); scores are normalised to [0,1] per rule
+    weights:
+      cost: 0.35
+      sla: 0.20
+      capacity: 0.10
+      on-time: 0.15
+      first-attempt: 0.10
+      rto: 0.10
+    max-failovers: 3
+  scorecard:
+    window-days: 30
+    # Bayesian smoothing: a carrier with few outcomes is pulled towards the prior instead of 0% / 100%
+    prior-weight: 20
+    prior-on-time: 0.85
+    prior-first-attempt: 0.80
+    prior-rto: 0.08
+  booking:
+    carrier-call-timeout: PT2S
+    lease: PT30S
+    reconcile-interval: PT15S
+    reconcile-after: PT1M
+    batch-size: 50
+  circuit-breaker:
+    window-size: 20
+    minimum-calls: 5
+    failure-rate-threshold: 0.5
+    open-duration: PT30S
+    half-open-calls: 2
+  ndr:
+    max-attempts: 3
+    immediate-rto-reasons: [CUSTOMER_REFUSED, OUT_OF_DELIVERY_AREA]
+  risk:
+    medium-threshold: 35
+    high-threshold: 60
+    high-cod-amount: 500
+  edd:
+    lead-time-percentile: 0.8
+    min-lane-samples: 30
+  webhook:
+    poll-interval: PT1S
+    batch-size: 50
+    max-attempts: 8
+    base-backoff: PT2S
+    max-backoff: PT30M
+    request-timeout: PT5S
+    lease: PT1M
+    workers: 8
+  cod:
+    reconcile-cron: "0 30 2 * * *"
+    reconcile-zone: Asia/Dubai
+  routing:
+    max-stops: 2000
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} level=%-5level thread=%thread corr=%X{correlationId:-} logger=%logger{36} msg=\"%msg\"%n"
+  level:
+    com.shipflow: INFO

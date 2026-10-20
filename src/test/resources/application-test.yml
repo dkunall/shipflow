@@ -1,0 +1,18 @@
+# Test profile. Datasource is injected by AbstractPostgresIT (Testcontainers or external/local Postgres).
+shipflow:
+  scheduling:
+    enabled: false
+  jwt:
+    secret: test-only-hmac-secret-0123456789-abcdefghijklmnop
+  booking:
+    carrier-call-timeout: PT0.5S
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 2
+logging:
+  level:
+    root: WARN
+    com.shipflow: WARN
+    org.testcontainers: INFO

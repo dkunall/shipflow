@@ -1,0 +1,7 @@
+# Local development only. NEVER use these values outside a laptop.
+spring:
+  datasource:
+    password: ${DB_PASSWORD:postgres}
+shipflow:
+  jwt:
+    secret: ${JWT_SECRET:dev-only-insecure-hmac-secret-change-me-0123456789}
