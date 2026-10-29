@@ -12,7 +12,7 @@ import java.util.Properties;
  * <ol>
  *   <li>Testcontainers (postgres:17-alpine) when a Docker daemon is available;</li>
  *   <li>external DB from env/system properties TEST_DB_URL / TEST_DB_USER / TEST_DB_PASSWORD;</li>
- *   <li>a local default jdbc:postgresql://localhost:5432/shipflow_test (postgres/postgres) if reachable.</li>
+ *   <li>a local default jdbc:postgresql://localhost:55460/shipflow_test (postgres/postgres) if reachable.</li>
  * </ol>
  * If none is reachable, {@link #get()} returns null and the integration tests are SKIPPED (not failed).
  * H2 is intentionally never used: the engine relies on PostgreSQL features (SKIP LOCKED, partial indexes, ON CONFLICT upserts, jsonb).
@@ -22,7 +22,7 @@ public final class TestDatabase {
     public record Target(String url, String user, String password, String source) {
     }
 
-    private static final String DEFAULT_URL = "jdbc:postgresql://localhost:5432/shipflow_test";
+    private static final String DEFAULT_URL = "jdbc:postgresql://localhost:55460/shipflow_test";
     private static Target target;
     private static boolean resolved;
     private static PostgreSQLContainer<?> container;

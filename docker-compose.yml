@@ -1,5 +1,9 @@
-# Local PostgreSQL 17 for ShipFlow (app DB + integration-test DB + benchmark DB).
-# The password below is a throwaway local-dev value; override with POSTGRES_PASSWORD for anything shared.
+# Full local stack: Postgres + the app.
+#   export JWT_SECRET=$(openssl rand -base64 48)   # never commit this
+#   docker compose up -d --build
+# Host ports: app 7300, postgres 55460. The Postgres password default is a throwaway local value.
+name: shipflow
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -8,7 +12,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: shipflow
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${PG_PORT:-55460}:5432"
     volumes:
       - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
       - shipflow-pg:/var/lib/postgresql/data
@@ -17,5 +21,25 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  app:
+    build: .
+    image: shipflow:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/shipflow
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>= 32 bytes)}
+      JWT_ISSUER: ${JWT_ISSUER:-shipflow-local}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-json}
+      JAVA_TOOL_OPTIONS: "-Xmx512m -XX:+ExitOnOutOfMemoryError"
+    ports:
+      - "127.0.0.1:${APP_PORT:-7300}:8080"
+    stop_grace_period: 30s
+    mem_limit: 900m
+
 volumes:
   shipflow-pg:

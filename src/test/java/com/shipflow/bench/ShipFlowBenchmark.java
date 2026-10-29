@@ -82,7 +82,7 @@ import java.util.function.Supplier;
  * "postgres", same as the test default), bench.out (docs/benchmark-results).
  */
 public final class ShipFlowBenchmark {
-    private static final String DB_URL = System.getProperty("bench.db.url", "jdbc:postgresql://localhost:5432/shipflow_bench");
+    private static final String DB_URL = System.getProperty("bench.db.url", "jdbc:postgresql://localhost:55460/shipflow_bench");
     private static final String DB_USER = System.getProperty("bench.db.user", "postgres");
     private static final String DB_PASSWORD = Optional.ofNullable(System.getenv("BENCH_DB_PASSWORD")).orElse("postgres");
     private static final int POOL = Integer.getInteger("bench.pool", 20);

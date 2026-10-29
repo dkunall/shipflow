@@ -95,7 +95,7 @@
                 <bench.runs>3</bench.runs>
                 <bench.threads>50,100,200</bench.threads>
                 <bench.scenarios>booking,scan,routing</bench.scenarios>
-                <bench.db.url>jdbc:postgresql://localhost:5432/shipflow_bench</bench.db.url>
+                <bench.db.url>jdbc:postgresql://localhost:55460/shipflow_bench</bench.db.url>
                 <bench.db.user>postgres</bench.db.user>
                 <bench.out>docs/benchmark-results</bench.out>
                 <bench.reserveLast>true</bench.reserveLast>

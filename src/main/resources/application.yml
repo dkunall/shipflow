@@ -5,7 +5,7 @@ spring:
     # in-flight requests get this long to finish after SIGTERM before the context closes
     timeout-per-shutdown-phase: ${SHUTDOWN_GRACE:20s}
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/shipflow}
+    url: ${DB_URL:jdbc:postgresql://localhost:55460/shipflow}
     username: ${DB_USER:postgres}
     password: ${DB_PASSWORD:}
     hikari:
@@ -47,7 +47,7 @@ spring:
       max-request-size: 5MB
 
 server:
-  port: ${PORT:8080}
+  port: ${PORT:7300}
   shutdown: graceful
 
 management:

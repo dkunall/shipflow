@@ -14,6 +14,6 @@ public class RequiresPostgres implements ExecutionCondition {
         return TestDatabase.get() != null
                 ? ConditionEvaluationResult.enabled("PostgreSQL available: " + TestDatabase.get().source())
                 : ConditionEvaluationResult.disabled("SKIPPED: no PostgreSQL available (Docker/Testcontainers, "
-                + "TEST_DB_URL, or localhost:5432/shipflow_test)");
+                + "TEST_DB_URL, or localhost:55460/shipflow_test)");
     }
 }
