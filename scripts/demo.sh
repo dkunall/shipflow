@@ -115,6 +115,6 @@ TOKEN="$MT" python3 scripts/loadtest.py "$H" 400 16 "LT-$RUN"
 if [[ "${KEEP:-1}" == "0" ]]; then
   step "stop (graceful shutdown)"
   docker compose stop app >/dev/null 2>&1
-  docker compose logs app 2>/dev/null | grep -iE 'graceful|shutdown' | tail -3 | jq -c '{message}' 2>/dev/null || true
+  docker compose logs --no-log-prefix app 2>/dev/null | grep -i 'graceful' | tail -3 | jq -c '{message}' 2>/dev/null || true
   docker compose down >/dev/null 2>&1
 fi
