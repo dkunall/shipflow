@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # unit tests + Testcontainers ITs (Docker is available on the runner); TEST_REQUIRE_DB makes a missing DB a failure, not a skip
+      - name: mvn verify
+        run: mvn -B verify
+        env:
+          TEST_REQUIRE_DB: "true"
+      - name: docker build
+        run: docker build -t shipflow:ci .
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: trivy (maven deps, fail on fixable HIGH/CRITICAL)
+        run: |
+          docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.76.1 fs \
+            --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --ignorefile /src/.trivyignore --exit-code 1 /src

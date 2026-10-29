@@ -1,0 +1,4 @@
+# spring-webmvc 6.2.x: fixes only shipped in 7.0.x. Not reachable here (no SSE endpoints, no XsltView).
+# Drop these when moving to Spring Boot 4.
+CVE-2026-47890
+CVE-2026-47884
