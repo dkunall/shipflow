@@ -1,6 +1,9 @@
 spring:
   application:
     name: shipflow
+  lifecycle:
+    # in-flight requests get this long to finish after SIGTERM before the context closes
+    timeout-per-shutdown-phase: ${SHUTDOWN_GRACE:20s}
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/shipflow}
     username: ${DB_USER:postgres}
@@ -58,6 +61,10 @@ management:
         enabled: true
       show-details: when_authorized
       roles: ADMIN
+      group:
+        # not ready until the database answers; liveness stays independent of it
+        readiness:
+          include: readinessState,db
   metrics:
     tags:
       application: ${spring.application.name}
