@@ -95,6 +95,7 @@
             <id>benchmark</id>
             <properties>
                 <bench.pool>20</bench.pool>
+                <bench.heap>2g</bench.heap>
                 <bench.warmupSec>5</bench.warmupSec>
                 <bench.runSec>10</bench.runSec>
                 <bench.runs>3</bench.runs>
@@ -115,8 +116,8 @@
                             <executable>java</executable>
                             <classpathScope>test</classpathScope>
                             <arguments>
-                                <argument>-Xms2g</argument>
-                                <argument>-Xmx2g</argument>
+                                <argument>-Xms${bench.heap}</argument>
+                                <argument>-Xmx${bench.heap}</argument>
                                 <argument>-Dbench.pool=${bench.pool}</argument>
                                 <argument>-Dbench.warmupSec=${bench.warmupSec}</argument>
                                 <argument>-Dbench.runSec=${bench.runSec}</argument>
