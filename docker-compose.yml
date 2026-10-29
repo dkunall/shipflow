@@ -13,8 +13,10 @@ services:
       POSTGRES_DB: shipflow
     ports:
       - "127.0.0.1:${PG_PORT:-55460}:5432"
+    configs:
+      - source: init-db
+        target: /docker-entrypoint-initdb.d/10-init.sql
     volumes:
-      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
       - shipflow-pg:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -32,7 +34,7 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/shipflow
       DB_USER: postgres
       DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>= 32 bytes)}
+      JWT_SECRET: ${JWT_SECRET:-}   # required; the app refuses to start without one
       JWT_ISSUER: ${JWT_ISSUER:-shipflow-local}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-json}
       JAVA_TOOL_OPTIONS: "-Xmx512m -XX:+ExitOnOutOfMemoryError"
@@ -40,6 +42,13 @@ services:
       - "127.0.0.1:${APP_PORT:-7300}:8080"
     stop_grace_period: 30s
     mem_limit: 900m
+
+configs:
+  # extra databases for the ITs and the benchmark (inline, so it also works with a remote docker daemon)
+  init-db:
+    content: |
+      CREATE DATABASE shipflow_test;
+      CREATE DATABASE shipflow_bench;
 
 volumes:
   shipflow-pg:
