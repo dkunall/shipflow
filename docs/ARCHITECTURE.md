@@ -1,6 +1,6 @@
 # ShipFlow – Architecture
 
-ShipFlow is a modular monolith (Spring Boot 3.3, Java 21, PostgreSQL 17). Each package is a bounded module:
+ShipFlow is a modular monolith (Spring Boot 3.5, Java 21, PostgreSQL 17). Each package is a bounded module:
 `api` (controllers / DTOs) → `application` (use cases, transaction boundaries) → `domain` (pure logic, no Spring, no
 I/O). Persistence uses JPA only for the `Shipment` aggregate (optimistic `@Version`); everything set-based or hot
 (capacity, stats, outbox, idempotency, lists) uses `JdbcTemplate` with hand-written SQL.
@@ -12,7 +12,7 @@ I/O). Persistence uses JPA only for the `Shipment` aggregate (optimistic `@Versi
 | `booking` | idempotent create, bulk CSV, e-store adapters, carrier booking + failover, reconciler | `ShipmentBookingFacade`, `ShipmentBookingService`, `BulkUploadService`, `CsvShipmentParser`, `OrderAdapter`, `BookingOrchestrator`, `BookingReconciler` |
 | `idempotency` | Idempotency-Key claim / replay / transient retry | `IdempotencyService`, `RequestHasher` |
 | `allocation` | filters → weighted rules → atomic capacity reservation, explainable decision | `AllocationEngine` (pure), `CandidateFilter`, `AllocationRule`, `AllocationService` |
-| `carrier` | carrier directory, rate cards, capacity, ports (adapters), circuit breaker + timeout gateway | `CarrierPort`, `CarrierGateway`, `CircuitBreaker`, `CapacityRepository`, `RateCard` |
+| `carrier` | carrier directory, rate cards, capacity, ports (adapters), circuit breaker + timeout + retry gateway | `CarrierPort`, `CarrierGateway`, `CircuitBreaker`, `CapacityRepository`, `RateCard` |
 | `shipment` | aggregate, state machine, lifecycle (audit + listeners), queries | `Shipment`, `ShipmentStateMachine`, `ShipmentLifecycle`, `ShipmentTransitionListener` |
 | `scan` | scan ingestion (idempotent, out-of-order safe, optimistic locking) | `ScanPolicy` (pure), `ScanIngestionService` |
 | `ndr` | failed-delivery handling, reattempt policy chain, auto-RTO, NDR report | `ReattemptPolicy`, `ReattemptPolicyChain`, `NdrService` |
@@ -231,15 +231,17 @@ WHERE reserved < capacity` is atomic per row; the CHECK constraint is the last l
 reserve-first it is locked for the whole booking transaction. Reserving as the *last* statement shrinks the lock hold
 to ~commit time. A lost race (capacity filled meanwhile) throws `CapacityRaceLostException`; the transaction is
 retried while the idempotency claim is still held; the final attempt falls back to reserve-first (falls through the
-ranked list). Bulk CSV, failover and reallocation keep reserve-first (simpler, not latency-critical). Numbers in
-PERFORMANCE.md.
+ranked list). Bulk CSV, failover and reallocation keep reserve-first (simpler, not latency-critical). Before/after
+numbers in PERFORMANCE.md.
 
 **ADR-004 Idempotency claim in its own committed transaction.** Concurrent duplicates block on / see the claim
 immediately; the effect and the COMPLETED marker commit atomically; failures delete the claim. Replays return the
 resource id and re-read current state (not a frozen body).
 
 **ADR-005 Carrier calls outside transactions; uncertain = no failover.** `CarrierGateway` refuses to run inside a
-transaction. Circuit breaker (count-based ring buffer, half-open trials) + hard timeout on a virtual thread. Timeouts
+transaction. Circuit breaker (count-based ring buffer, half-open trials) + hard timeout on a virtual thread. Technical failures
+are retried once by Resilience4j `Retry` with jittered backoff (business rejections and timeouts are not); one
+logical call records one breaker result. The caller's MDC (correlation id) is copied onto the carrier thread. Timeouts
 become UNKNOWN and are reconciled via `lookup(booking_ref)`, because failing over could create a second consignment.
 
 **ADR-006 Optimistic locking for scans.** Scans for one shipment are rare-but-concurrent (carrier retries,
@@ -263,7 +265,8 @@ string, which ops can act on (OTP, verification call, prepaid nudge) and which c
 rule behind the same `RiskRule` contract.
 
 **ADR-011 Write-behind statistics.** Measured: per-scan `UPSERT +=` on `lane_lead_time` / `carrier_scorecard_daily`
-made every DELIVERED scan of a lane queue on the same row (avg 12 lock waiters at 50 threads). Outcomes are now
+made every DELIVERED scan of a lane queue on the same row (seen as lock waiters in `pg_stat_activity` during the
+scan benchmark; the before numbers were not re-measured for the current docs). Outcomes are now
 appended in the scan transaction (exactly-once with the transition) and folded in batches by `StatsAggregator`
 (claim + apply in one transaction ⇒ exactly-once; SKIP LOCKED ⇒ multiple instances; sorted keys ⇒ no deadlocks).
 Trade-off: scorecards / lane histograms / risk stats lag by up to the flush interval (1 s default), which is
