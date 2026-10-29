@@ -5,7 +5,7 @@ COPY pom.xml .
 RUN mvn -B -q dependency:go-offline -DexcludeArtifactIds=shipflow
 COPY src ./src
 RUN mvn -B -q package -DskipTests \
- && java -Djarmode=layertools -jar target/shipflow-*.jar extract --destination /layers
+ && java -Djarmode=tools -jar target/shipflow-*.jar extract --layers --launcher --destination /layers
 
 # runtime stage: JRE only, non-root
 FROM eclipse-temurin:21-jre-alpine
