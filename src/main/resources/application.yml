@@ -104,6 +104,8 @@ shipflow:
     reconcile-interval: PT15S
     reconcile-after: PT1M
     batch-size: 50
+    retry-max-attempts: 2
+    retry-backoff: PT0.1S
   circuit-breaker:
     window-size: 20
     minimum-calls: 5

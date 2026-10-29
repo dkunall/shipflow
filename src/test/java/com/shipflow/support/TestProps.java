@@ -23,7 +23,7 @@ public final class TestProps {
                 new ShipFlowProperties.Allocation(WEIGHTS, 3, true, 3),
                 scorecard(),
                 new ShipFlowProperties.Booking(Duration.ofSeconds(2), Duration.ofSeconds(30), Duration.ofSeconds(15),
-                        Duration.ofMinutes(1), 50),
+                        Duration.ofMinutes(1), 50, 2, Duration.ofMillis(20)),
                 new ShipFlowProperties.CircuitBreaker(20, 5, 0.5, Duration.ofSeconds(30), 2),
                 new ShipFlowProperties.Ndr(3, List.of("CUSTOMER_REFUSED", "OUT_OF_DELIVERY_AREA")),
                 new ShipFlowProperties.Risk(35, 60, new BigDecimal("500")),

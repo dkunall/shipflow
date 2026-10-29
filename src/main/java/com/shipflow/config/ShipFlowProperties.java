@@ -36,8 +36,13 @@ public record ShipFlowProperties(Jwt jwt, Scheduling scheduling, Idempotency ide
                             double priorRto) {
     }
 
+    /**
+     * @param retryMaxAttempts total attempts per carrier call for technical failures (1 = no retry); all attempts
+     *                         share the single {@code carrierCallTimeout} budget
+     * @param retryBackoff     base wait before a retry; doubled per attempt and randomised by +-50 %
+     */
     public record Booking(Duration carrierCallTimeout, Duration lease, Duration reconcileInterval,
-                          Duration reconcileAfter, int batchSize) {
+                          Duration reconcileAfter, int batchSize, int retryMaxAttempts, Duration retryBackoff) {
     }
 
     public record CircuitBreaker(int windowSize, int minimumCalls, double failureRateThreshold, Duration openDuration,

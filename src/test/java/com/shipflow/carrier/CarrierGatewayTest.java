@@ -11,6 +11,7 @@ import com.shipflow.carrier.resilience.CarrierGateway;
 import com.shipflow.carrier.resilience.CarrierGateway.CallOutcome;
 import com.shipflow.carrier.resilience.CircuitBreakerRegistry;
 import com.shipflow.config.ShipFlowProperties;
+import com.shipflow.observability.ShipFlowMetrics;
 import com.shipflow.support.TestProps;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,16 +37,18 @@ class CarrierGatewayTest {
     private final BookingRequest req = new BookingRequest("X", "SF-1-X", "SF1", "HUB", "P", 500, false, null, "AED");
     private final CarrierGateway gateway;
     private final CircuitBreakerRegistry breakers;
+    private final ShipFlowMetrics metrics;
 
     CarrierGatewayTest() {
         when(port.integration()).thenReturn("FAKE");
         ShipFlowProperties d = TestProps.defaults();
         ShipFlowProperties props = new ShipFlowProperties(d.jwt(), d.scheduling(), d.idempotency(), d.allocation(),
                 d.scorecard(), new ShipFlowProperties.Booking(Duration.ofMillis(200), Duration.ofSeconds(30),
-                Duration.ofSeconds(15), Duration.ofMinutes(1), 50), d.circuitBreaker(), d.ndr(), d.risk(), d.edd(),
-                d.webhook(), d.cod(), d.routing());
+                Duration.ofSeconds(15), Duration.ofMinutes(1), 50, 2, Duration.ofMillis(20)), d.circuitBreaker(),
+                d.ndr(), d.risk(), d.edd(), d.webhook(), d.cod(), d.routing());
         breakers = new CircuitBreakerRegistry(props, Clock.systemUTC(), new SimpleMeterRegistry());
-        gateway = new CarrierGateway(new CarrierPortRegistry(List.of(port)), breakers, props);
+        metrics = new ShipFlowMetrics(new SimpleMeterRegistry());
+        gateway = new CarrierGateway(new CarrierPortRegistry(List.of(port)), breakers, props, metrics);
     }
 
     @Test
@@ -67,6 +71,22 @@ class CarrierGatewayTest {
         long t0 = System.nanoTime();
         assertThat(gateway.book(carrier, req)).isInstanceOf(CallOutcome.Uncertain.class);
         assertThat((System.nanoTime() - t0) / 1_000_000).isLessThan(1500);
+    }
+
+    @Test
+    void transientFailureIsRetriedOnceAndCountsAsOneBreakerSuccess() throws Exception {
+        when(port.book(any())).thenThrow(new IllegalStateException("503")).thenReturn(new BookingResult("AWB2"));
+        assertThat(gateway.book(carrier, req)).isEqualTo(new CallOutcome.Booked("AWB2"));
+        verify(port, times(2)).book(any());
+        assertThat(metrics.registry().counter("shipflow.carrier.retries", "carrier", "X").count()).isEqualTo(1.0);
+        assertThat(breakers.forCarrier("X").state().name()).isEqualTo("CLOSED");
+    }
+
+    @Test
+    void businessRejectionIsNotRetried() throws Exception {
+        when(port.book(any())).thenThrow(new CarrierRejectedException("pincode blocked"));
+        gateway.book(carrier, req);
+        verify(port, times(1)).book(any());
     }
 
     @Test

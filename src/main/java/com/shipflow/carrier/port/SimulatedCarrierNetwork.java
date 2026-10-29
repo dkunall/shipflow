@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <ul>
  *   <li>OK - books (deduplicated by booking ref, like a real idempotent API);</li>
  *   <li>FAIL - technical error (HTTP 5xx equivalent);</li>
+ *   <li>FLAKY - the first attempt for a booking ref fails with a 5xx, the next one books (exercises the retry);</li>
  *   <li>REJECT - business rejection;</li>
  *   <li>TIMEOUT_BOOKED - books but responds slower than our timeout (uncertain outcome; lookup finds it);</li>
  *   <li>TIMEOUT_LOST - times out and does NOT book (lookup finds nothing).</li>
@@ -22,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Component
 public class SimulatedCarrierNetwork {
-    public enum Mode { OK, FAIL, REJECT, TIMEOUT_BOOKED, TIMEOUT_LOST }
+    public enum Mode { OK, FAIL, FLAKY, REJECT, TIMEOUT_BOOKED, TIMEOUT_LOST }
 
     public record Behaviour(Mode mode, Duration latency) {
     }
@@ -31,6 +32,7 @@ public class SimulatedCarrierNetwork {
     private final Map<String, String> bookingsByRef = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> createdPerCarrier = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> callsPerCarrier = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> attemptsPerRef = new ConcurrentHashMap<>();
     private final AtomicLong seq = new AtomicLong();
     private volatile Duration hangDuration = Duration.ofSeconds(5);
 
@@ -47,6 +49,7 @@ public class SimulatedCarrierNetwork {
         bookingsByRef.clear();
         createdPerCarrier.clear();
         callsPerCarrier.clear();
+        attemptsPerRef.clear();
     }
 
     public Behaviour behaviourOf(String carrierCode) {
@@ -59,6 +62,12 @@ public class SimulatedCarrierNetwork {
         sleep(b.latency());
         switch (b.mode()) {
             case FAIL -> throw new IllegalStateException("simulated 503 from " + r.carrierCode());
+            case FLAKY -> {
+                if (attemptsPerRef.computeIfAbsent(r.bookingRef(), k -> new AtomicInteger()).incrementAndGet() == 1) {
+                    throw new IllegalStateException("simulated transient 503 from " + r.carrierCode());
+                }
+                return new BookingResult(create(r));
+            }
             case REJECT -> throw new CarrierRejectedException("simulated rejection by " + r.carrierCode());
             case TIMEOUT_LOST -> {
                 sleep(hangDuration);

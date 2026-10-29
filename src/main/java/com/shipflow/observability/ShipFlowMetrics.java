@@ -36,6 +36,10 @@ public class ShipFlowMetrics {
         counter("shipflow.carrier.bookings", "carrier", carrier, "outcome", outcome);
     }
 
+    public void carrierRetry(String carrier) {
+        counter("shipflow.carrier.retries", "carrier", carrier);
+    }
+
     public void scan(String outcome, String source) {
         counter("shipflow.scans", "outcome", outcome, "source", source);
     }

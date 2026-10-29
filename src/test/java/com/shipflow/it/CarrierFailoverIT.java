@@ -74,14 +74,27 @@ class CarrierFailoverIT extends AbstractPostgresIT {
     }
 
     @Test
+    void transientCarrierErrorIsRetriedInsteadOfFailingOver() throws Exception {
+        carriers();
+        simulator.configure("CHEAP", Mode.FLAKY, Duration.ZERO);
+        JsonNode s = bookOk(m1, "R-1", "PREPAID", null);
+        assertThat(s.get("carrier").get("code").asText()).isEqualTo("CHEAP");
+        assertThat(s.get("awb").asText()).startsWith("CHEAP-");
+        assertThat(simulator.calls("CHEAP")).isEqualTo(2);
+        assertThat(simulator.consignmentsCreated("CHEAP")).isEqualTo(1);
+        assertThat(simulator.calls("PRICEY")).isZero();
+    }
+
+    @Test
     void circuitOpensAndStopsCallingTheBrokenCarrier() throws Exception {
         carriers();
         simulator.configure("CHEAP", Mode.FAIL, Duration.ZERO);
         for (int i = 0; i < 12; i++) {
             assertThat(bookOk(m1, "CB-" + i, "PREPAID", null).get("carrier").get("code").asText()).isEqualTo("PRICEY");
         }
-        // breaker min-calls = 5 at 50% threshold: after 5 failures CHEAP is filtered out without being called
-        assertThat(simulator.calls("CHEAP")).isEqualTo(5);
+        // breaker min-calls = 5 at 50% threshold: after 5 failed calls CHEAP is filtered out without being called.
+        // Each logical call is 2 attempts (one retry on a technical failure), so the carrier saw 10 requests.
+        assertThat(simulator.calls("CHEAP")).isEqualTo(10);
         assertThat(breakers.forCarrier("CHEAP").state().name()).isEqualTo("OPEN");
         String rejected = jdbc.queryForObject("""
                 SELECT explanation->'rejected'->0->>'filter' FROM allocation_decision ORDER BY id DESC LIMIT 1

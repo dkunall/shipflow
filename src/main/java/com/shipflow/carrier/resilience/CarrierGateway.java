@@ -6,6 +6,10 @@ import com.shipflow.carrier.port.BookingResult;
 import com.shipflow.carrier.port.CarrierPortRegistry;
 import com.shipflow.carrier.port.CarrierRejectedException;
 import com.shipflow.config.ShipFlowProperties;
+import com.shipflow.observability.ShipFlowMetrics;
+import io.github.resilience4j.core.IntervalFunction;
+import io.github.resilience4j.retry.Retry;
+import io.github.resilience4j.retry.RetryConfig;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,8 +26,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Resilient call wrapper around {@link com.shipflow.carrier.port.CarrierPort}: circuit breaker + hard timeout,
- * mapping every result into an explicit {@link CallOutcome}. Refuses to run inside a DB transaction (a slow
+ * Resilient call wrapper around {@link com.shipflow.carrier.port.CarrierPort}: circuit breaker + retry with
+ * jittered exponential backoff (Resilience4j) for technical failures + one hard timeout over all attempts, mapping
+ * every result into an explicit {@link CallOutcome}. Retrying a booking is safe because ports must be idempotent on
+ * {@code bookingRef}; business rejections are never retried. The breaker sees one result per logical call. Refuses to run inside a DB transaction (a slow
  * carrier must never hold connections or row locks).
  */
 @Component
@@ -41,12 +47,22 @@ public class CarrierGateway {
     private final CarrierPortRegistry ports;
     private final CircuitBreakerRegistry breakers;
     private final Duration timeout;
+    private final RetryConfig retryConfig;
+    private final ShipFlowMetrics metrics;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    public CarrierGateway(CarrierPortRegistry ports, CircuitBreakerRegistry breakers, ShipFlowProperties props) {
+    public CarrierGateway(CarrierPortRegistry ports, CircuitBreakerRegistry breakers, ShipFlowProperties props,
+                          ShipFlowMetrics metrics) {
         this.ports = ports;
         this.breakers = breakers;
-        this.timeout = props.booking().carrierCallTimeout();
+        this.metrics = metrics;
+        ShipFlowProperties.Booking b = props.booking();
+        this.timeout = b.carrierCallTimeout();
+        this.retryConfig = RetryConfig.custom()
+                .maxAttempts(Math.max(1, b.retryMaxAttempts()))
+                .intervalFunction(IntervalFunction.ofExponentialRandomBackoff(b.retryBackoff(), 2.0, 0.5))
+                .retryOnException(e -> !(e instanceof CarrierRejectedException) && !(e instanceof InterruptedException))
+                .build();
     }
 
     public CallOutcome book(CarrierInfo carrier, BookingRequest request) {
@@ -55,7 +71,15 @@ public class CarrierGateway {
         if (!cb.tryAcquirePermission()) {
             return new CallOutcome.CircuitOpen();
         }
-        Future<BookingResult> f = executor.submit(() -> ports.forIntegration(carrier.integration()).book(request));
+        Retry retry = Retry.of("carrier-" + carrier.code(), retryConfig);
+        retry.getEventPublisher().onRetry(e -> {
+            metrics.carrierRetry(carrier.code());
+            log.info("retrying carrier booking carrier={} ref={} attempt={} wait={}ms error={}", carrier.code(),
+                    request.bookingRef(), e.getNumberOfRetryAttempts(), e.getWaitInterval().toMillis(),
+                    String.valueOf(e.getLastThrowable()));
+        });
+        Future<BookingResult> f = executor.submit(() -> retry.executeCallable(
+                () -> ports.forIntegration(carrier.integration()).book(request)));
         try {
             BookingResult r = f.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
             cb.onSuccess();

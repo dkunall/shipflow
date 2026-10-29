@@ -46,7 +46,7 @@ public final class AdminRequests {
     public record SetCapacity(@NotBlank String zoneCode, @NotNull LocalDate date, @NotNull @Min(0) Integer capacity) {
     }
 
-    public record SimulateCarrier(@NotNull @Pattern(regexp = "OK|FAIL|REJECT|TIMEOUT_BOOKED|TIMEOUT_LOST") String mode,
+    public record SimulateCarrier(@NotNull @Pattern(regexp = "OK|FAIL|FLAKY|REJECT|TIMEOUT_BOOKED|TIMEOUT_LOST") String mode,
                                   @Min(0) @Max(60_000) Integer latencyMs) {
     }
 }
