@@ -29,11 +29,18 @@ jobs:
 
   dependency-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: trivy (maven deps, fail on fixable HIGH/CRITICAL)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # scan the packaged jar (what actually ships) instead of resolving the pom tree from Maven Central
+      - run: mvn -B -q -DskipTests package
+      - name: trivy (jar deps, fail on fixable HIGH/CRITICAL)
         run: |
-          docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.76.1 fs \
+          docker run --rm -v "$PWD:/src:ro" aquasec/trivy:0.76.1 rootfs \
             --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
-            --ignorefile /src/.trivyignore --exit-code 1 /src
+            --ignorefile /src/.trivyignore --exit-code 1 /src/target
