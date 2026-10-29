@@ -1,0 +1,82 @@
+
+== build + start (docker compose project: shipflow)
+ Container shipflow-postgres-1  Waiting
+ Container shipflow-postgres-1  Healthy
+ Container shipflow-app-1  Healthy
+{"status":"UP"}
+{"status":"UP"}
+
+== seed a small Dubai network (3 carriers, 3 pincodes, 2 riders)
+
+== 1. book a COD shipment
+{"id":"ed1889dc-2baa-4c62-a4cf-0157aebf7a82","status":"ALLOCATED","trackingNumber":"SFF5P938MA5FER","carrier":"OWNF","awb":"OF-SFF5P938MA5FER","cost":{"amount":12.75,"currency":"AED"},"risk":{"score":20,"band":"LOW"},"promisedDate":"2026-11-02"}
+
+== 2. replay the same Idempotency-Key -> same shipment, no second booking
+{"id":"ed1889dc-2baa-4c62-a4cf-0157aebf7a82","trackingNumber":"SFF5P938MA5FER"}
+same id: yes
+
+== 3. same key, different body -> rejected
+{"status":422,"code":"IDEMPOTENCY_KEY_REUSED","title":"Unprocessable Entity"}
+
+== 4. validation error -> RFC 7807
+{"status":400,"code":"VALIDATION_FAILED","title":"Bad Request","errors":7}
+
+== 5. why this carrier? (filters + weighted rule scores)
+{"summary":"OWNF scored 0.9495; strongest factor: cost (total 12.75 AED (freight 9.00, cod fee 3.75)); 3 eligible, 0 rejected","ranked":[{"carrier":"OWNF","totalScore":0.9495,"price":"12.75 AED","slaDays":1},{"carrier":"FASTX","totalScore":0.8509,"price":"17.75 AED","slaDays":1},{"carrier":"CHEAP","totalScore":0.7687,"price":"14.75 AED","slaDays":3}],"rejected":[]}
+
+== 6. bulk CSV upload (2 rows)
+{"total":2,"created":2,"duplicates":0,"invalid":0,"rows":[{"line":2,"status":"CREATED"},{"line":3,"status":"CREATED"}]}
+
+== 7. scans PICKED_UP -> OUT_FOR_DELIVERY -> DELIVERED, plus a duplicate
+{"eventCode":"PICKED_UP","result":"APPLIED","shipmentStatus":"PICKED_UP"}
+{"eventCode":"OUT_FOR_DELIVERY","result":"APPLIED","shipmentStatus":"OUT_FOR_DELIVERY"}
+{"eventCode":"DELIVERED","result":"APPLIED","shipmentStatus":"DELIVERED"}
+{"eventCode":"DELIVERED","result":"DUPLICATE","shipmentStatus":"DELIVERED"}
+
+== 8. public tracking page (no auth, no PII)
+{"status":"DELIVERED","carrier":"Own fleet","destinationCity":"Dubai","promisedDate":"2026-11-02","events":["CREATED","ALLOCATED","PICKED_UP","OUT_FOR_DELIVERY","DELIVERED"]}
+
+== 9. COD remittance + reconciliation
+{"remittanceId":1}
+{"runId":1,"carrier":"OWNF","periodFrom":"2026-10-28T18:15:44Z","periodTo":"2026-10-30T18:15:44Z","runCount":1,"matched":1,"shortCount":0,"excess":0,"missing":0,"expectedTotal":250.00,"remittedTotal":250.00,"lastRunAt":"2026-10-29T18:15:44.826406Z"}
+
+== 10. role check: a MERCHANT token on an ADMIN endpoint -> 403
+403
+no token: 401
+
+== 11. transient carrier errors are retried (FASTX + CHEAP flaky: first call per booking fails with 503)
+{"status":"ALLOCATED","carrier":"FASTX","awb":"FASTX-100001"}
+{"status":"ALLOCATED","carrier":"FASTX","awb":"FASTX-100002"}
+{"status":"ALLOCATED","carrier":"FASTX","awb":"FASTX-100003"}
+shipflow_carrier_retries_total{application="shipflow",carrier="FASTX"} 3.0
+
+== 12. FASTX hard down -> breaker opens, bookings fail over
+      7 CHEAP
+{"carrier":"FASTX","circuit":"OPEN"}
+
+== 13. correlation id: echoed back as a header and attached to every log line of the request
+X-Correlation-Id: demo-trace-1793297743
+{"level":"INFO","correlationId":"demo-flaky-1793297743-1","message":"retrying carrier booking carrier=FASTX ref=SF-ae750ec1-d285-4da0-a037-6ffe45310101-FASTX attempt=1 wait=68ms error=java.lang.IllegalStateException: simulated transient 503 from FASTX"}
+
+== 14. a few metrics
+http_server_requests_seconds_count{application="shipflow",error="none",exception="none",method="POST",outcome="CLIENT_ERROR",status="400",uri="/api/v1/shipments"} 1
+http_server_requests_seconds_count{application="shipflow",error="none",exception="none",method="POST",outcome="CLIENT_ERROR",status="422",uri="/api/v1/shipments"} 1
+http_server_requests_seconds_count{application="shipflow",error="none",exception="none",method="POST",outcome="SUCCESS",status="201",uri="/api/v1/shipments"} 13
+shipflow_allocation_failovers_total{application="shipflow",from="FASTX",reason="booking_failed"} 3.0
+shipflow_allocations_total{application="shipflow",carrier="CHEAP",result="allocated"} 7.0
+shipflow_allocations_total{application="shipflow",carrier="FASTX",result="allocated"} 6.0
+shipflow_allocations_total{application="shipflow",carrier="OWNF",result="allocated"} 3.0
+shipflow_carrier_bookings_total{application="shipflow",carrier="CHEAP",outcome="Booked"} 7.0
+shipflow_carrier_bookings_total{application="shipflow",carrier="FASTX",outcome="Booked"} 3.0
+shipflow_carrier_bookings_total{application="shipflow",carrier="FASTX",outcome="Failed"} 3.0
+shipflow_carrier_bookings_total{application="shipflow",carrier="OWNF",outcome="Booked"} 3.0
+shipflow_carrier_retries_total{application="shipflow",carrier="FASTX"} 6.0
+
+== 15. load: 400 bookings, 16 concurrent clients (single box: client + app + postgres together)
+requests=400 concurrency=16 wall=2.91s throughput=137.3 req/s
+latency ms: p50=114.2 p95=177.8 p99=216.9 max=245.5
+status codes: {201: 400}
+
+== stop (graceful shutdown)
+{"message":"Commencing graceful shutdown. Waiting for active requests to complete"}
+{"message":"Graceful shutdown complete"}
