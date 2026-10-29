@@ -74,6 +74,22 @@ class CarrierGatewayTest {
     }
 
     @Test
+    void carrierCallSeesTheCallersCorrelationId() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        when(port.book(any())).thenAnswer(inv -> {
+            seen.set(org.slf4j.MDC.get("correlationId"));
+            return new BookingResult("AWB3");
+        });
+        org.slf4j.MDC.put("correlationId", "corr-42");
+        try {
+            gateway.book(carrier, req);
+        } finally {
+            org.slf4j.MDC.remove("correlationId");
+        }
+        assertThat(seen.get()).isEqualTo("corr-42");
+    }
+
+    @Test
     void transientFailureIsRetriedOnceAndCountsAsOneBreakerSuccess() throws Exception {
         when(port.book(any())).thenThrow(new IllegalStateException("503")).thenReturn(new BookingResult("AWB2"));
         assertThat(gateway.book(carrier, req)).isEqualTo(new CallOutcome.Booked("AWB2"));

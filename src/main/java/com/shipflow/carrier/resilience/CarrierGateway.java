@@ -13,11 +13,14 @@ import io.github.resilience4j.retry.RetryConfig;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -78,7 +81,7 @@ public class CarrierGateway {
                     request.bookingRef(), e.getNumberOfRetryAttempts(), e.getWaitInterval().toMillis(),
                     String.valueOf(e.getLastThrowable()));
         });
-        Future<BookingResult> f = executor.submit(() -> retry.executeCallable(
+        Future<BookingResult> f = submit(() -> retry.executeCallable(
                 () -> ports.forIntegration(carrier.integration()).book(request)));
         try {
             BookingResult r = f.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -106,7 +109,7 @@ public class CarrierGateway {
     /** Lookup for uncertain outcomes; empty Optional = carrier confirms it has no such booking. */
     public Optional<Optional<String>> lookup(CarrierInfo carrier, String bookingRef) {
         assertNoTransaction();
-        Future<Optional<BookingResult>> f = executor.submit(() ->
+        Future<Optional<BookingResult>> f = submit(() ->
                 ports.forIntegration(carrier.integration()).lookup(carrier.code(), bookingRef));
         try {
             return Optional.of(f.get(timeout.toMillis(), TimeUnit.MILLISECONDS).map(BookingResult::awb));
@@ -119,7 +122,7 @@ public class CarrierGateway {
 
     public void cancelQuietly(CarrierInfo carrier, String bookingRef) {
         assertNoTransaction();
-        Future<?> f = executor.submit(() -> {
+        Future<?> f = submit(() -> {
             ports.forIntegration(carrier.integration()).cancel(carrier.code(), bookingRef);
             return null;
         });
@@ -129,6 +132,21 @@ public class CarrierGateway {
             f.cancel(true);
             log.warn("carrier cancel failed carrier={} ref={} error={}", carrier.code(), bookingRef, e.toString());
         }
+    }
+
+    /** Carrier calls run on their own thread; carry the caller's MDC (correlation id) along so the logs line up. */
+    private <T> Future<T> submit(Callable<T> task) {
+        Map<String, String> ctx = MDC.getCopyOfContextMap();
+        return executor.submit(() -> {
+            if (ctx != null) {
+                MDC.setContextMap(ctx);
+            }
+            try {
+                return task.call();
+            } finally {
+                MDC.clear();
+            }
+        });
     }
 
     private static void assertNoTransaction() {
